@@ -914,7 +914,7 @@ func updateContext(h *ParatranzHandler, pf ParatranzFile, tranfolder, tranname s
 	finaltrans := []ParatranzTranslation{}
 
 	for _, tran := range filetrans {
-		if tran.Original != "" {
+		if !shouldSkip(tran.Original) {
 			finaltrans = append(finaltrans, tran)
 		}
 	}
@@ -931,6 +931,10 @@ func updateContext(h *ParatranzHandler, pf ParatranzFile, tranfolder, tranname s
 	if err != nil {
 		zap.S().Fatalln("UpdateFile fial", krPath, err)
 	}
+}
+
+func shouldSkip(orginal string) bool {
+	return orginal == "" || orginal == "[SuperCoin]" || orginal == `[SuperCoin]<style="highlight"></style>`
 }
 
 func fixByForces(h *ParatranzHandler, pf ParatranzFile, tranfolder, tranname string) {
