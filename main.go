@@ -37,6 +37,8 @@ var (
 	exportUT           = false
 
 	reseteol = false
+
+	importLLC = false
 )
 
 func init() {
@@ -53,6 +55,7 @@ func init() {
 	flag.StringVar(&replacefile, "replace", "", "replace translation from file")
 	flag.BoolVar(&reseteol, "reset-eol", false, "reset end of line from files")
 	flag.BoolVar(&exportUT, "export-untranslate", false, "export untranslate storydata")
+	flag.BoolVar(&importLLC, "import-llc", false, "import scenario model codes")
 
 	flag.Parse()
 }
@@ -91,6 +94,112 @@ func main() {
 	// if reseteol {
 	// 	resetEOL()
 	// }
+
+	if importLLC {
+		importLLCFiles()
+	}
+}
+
+func importLLCFiles() {
+	zap.S().Infoln("Start import LLC scenario model codes")
+
+	h := NewParatranzHandler(paraid, token)
+	m, err := h.GetFiles()
+	if err != nil {
+		zap.S().Fatalln("GetFiles error", err)
+	}
+
+	b, err := os.ReadFile("dump/kr_files.txt")
+	if err != nil {
+		zap.S().Fatalln("read dump/kr_files.txt fail", err)
+	}
+
+	lines := strings.Split(string(b), "\n")
+
+	for _, line := range lines {
+		if len(line) == 0 {
+			continue
+		}
+		sp := strings.Split(line, "\t")
+		if len(sp) < 2 {
+			zap.S().Fatalln("files.txt split error:", line)
+		}
+
+		filetype := sp[0]
+		tranpath, tranname := getTranPath(sp[1])
+		fulltranpath := filepath.Join(tranpath, tranname)
+
+		if filetype != "D" {
+			if f, has := m[fulltranpath]; !has {
+				zap.S().Errorln("missing file for importLLCFiles", fulltranpath)
+				continue
+			} else {
+				importLLCFile(h, f, tranpath, tranname)
+			}
+		}
+
+	}
+}
+
+func importLLCFile(h *ParatranzHandler, pf ParatranzFile, tranfolder, tranname string) {
+	zap.S().Infoln("importLLCFile", pf.ID, tranfolder, tranname)
+
+	importPath := filepath.Join("import/TW", tranfolder, tranname)
+
+	var filetrans []ParatranzTranslation
+
+	err := retryWithBackoff(func() error {
+		trans, err := h.GetTranslation(pf.ID)
+		filetrans = trans
+		return err
+	})
+
+	if err != nil {
+		zap.S().Fatalln("GetTranslation", pf.Name, pf.ID, err)
+	}
+
+	_, importPMData, importErr := getPMData(importPath)
+
+	importTran := map[string]string{}
+	if importErr == nil {
+		importTran = importPMData.getTranMap()
+	}
+
+	updated := []ParatranzTranslation{}
+
+	for i, tran := range filetrans {
+
+		// id and model skip context
+		if strings.HasSuffix(tran.Key, "->id") || strings.HasSuffix(tran.Key, "->model") ||
+			(tran.Translation != "" && !strings.HasPrefix(tran.Translation, "[LLC]")) {
+			continue
+		}
+
+		fmt.Println(tran.Translation)
+
+		filetrans[i].Translation = "[LLC]" + importTran[tran.Key]
+		filetrans[i].Stage = 1
+
+		updated = append(updated, filetrans[i])
+	}
+
+	if len(updated) == 0 {
+		zap.S().Infoln("importLLCFile no update", pf.Name, pf.ID)
+		return
+	}
+
+	tranb, err := JSONMarshal(updated)
+	if err != nil {
+		zap.S().Fatalln("JSONMarshal", pf.Name, pf.ID, updated, err)
+	}
+
+	err = retryWithBackoff(func() error {
+		return h.UpdateTranslation(pf.ID, tranb, pf.Name, true, false)
+	})
+	if err != nil {
+		zap.S().Fatalln("UpdateTranslation fial", tranfolder, tranname, err)
+	}
+
 }
 
 func resetEOL() {
@@ -278,7 +387,8 @@ func exportAssetsWithArtifact(langType string, id1, id2 int) {
 			m := map[string]string{}
 
 			for _, t := range fromTrans {
-				m[t.Key] = strings.ReplaceAll(html.UnescapeString(t.Translation), "\\n", "\n")
+				trantext, _ := strings.CutPrefix(t.Translation, "[LLC]")
+				m[t.Key] = strings.ReplaceAll(html.UnescapeString(trantext), "\\n", "\n")
 			}
 
 			krPMData.setFromTranMap(m)

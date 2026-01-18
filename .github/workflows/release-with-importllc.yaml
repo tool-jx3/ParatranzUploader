@@ -1,0 +1,114 @@
+name: release-with-importllc
+
+on:
+  workflow_dispatch:
+
+jobs:
+  release:
+
+    runs-on: ubuntu-latest
+
+    env:
+      CLT_FOLDER_NAME: ${{ vars.CLT_FOLDER_NAME || 'TW' }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check if AssetsRepo is set
+        run: |
+          if [ -z "${{ vars.ASSETS_REPO }}" ]; then
+            echo "Error: ASSETS_REPO is not set"
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ vars.ASSETS_REPO }}
+          path: Assets
+
+      - name: Setup golang
+        uses: actions/setup-go@v5
+        with:
+          go-version: 'stable'
+          cache: true
+
+      - run: go version
+
+      - name: Build
+        run: go build
+
+      - name: List files
+        run: bash ./scripts/list_all_file_to_change.sh A
+
+      - name: Filter for test
+        if: ${{ vars.IS_TEST == 'true' }}
+        run: sed -i '2,$d' ./dump/en_files.txt
+
+      - name: Download Paratranz artifact
+        run: bash ./scripts/download_artifact.sh ${{ secrets.PARA_PROJECT_ID }} ${{ secrets.PARA_TOKEN }}
+
+      - name: Download Paratranz artifact2
+        run: |
+          if [ -n "${{ secrets.PARA_PROJECT_IMPORT_ID }}" ]; then
+            bash ./scripts/download_artifact.sh ${{ secrets.PARA_PROJECT_IMPORT_ID }} ${{ secrets.PARA_TOKEN }}
+          fi
+
+      - name: Run export
+        run: ./ParatranzUploader -export en -from-artifact -id ${{ secrets.PARA_PROJECT_ID }} -id2 ${{ secrets.PARA_PROJECT_IMPORT_ID || 0 }}
+
+      - name: Get current date
+        id: date
+        run: |
+          echo "tag=$(date +'%s')" >> $GITHUB_ENV
+          echo release_date=$(date -u +%Y-%m-%d) >> $GITHUB_ENV
+
+      - name: Generate full_hash
+        id: hash
+        run: |
+          TIMESTAMP_HASH=$(date -u +%s | sha256sum | head -c 3)
+          COMMIT_HASH=$(git log -1 --pretty=format:%h | head -c 3)
+          FULL_HASH="${TIMESTAMP_HASH}${COMMIT_HASH}"
+          echo "full_hash=$FULL_HASH" >> $GITHUB_ENV
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release_dump_${{ env.tag }}_${{ env.full_hash }}
+          path: dump/
+
+      - name: Compress localize files to zip
+        run: cd export/LimbusCompany_Data/Lang/TW/ && zip -r ../../../localize_files.zip .
+
+      - name: Rename clt folder
+        run: bash ./scripts/rename_clt.sh ${{ env.CLT_FOLDER_NAME }}
+
+      - name: Compress to zip
+        run: cd export && zip -r "CLT_only_text_${{ env.tag }}_${{ env.full_hash }}.zip" LimbusCompany_Data
+
+      - name: Download font
+        run: bash ./scripts/copy_font.sh ${{ env.CLT_FOLDER_NAME }}
+
+      - name: Make config
+        run: bash ./scripts/create_config.sh ${{ env.CLT_FOLDER_NAME }}
+
+      - name: Compress with font to zip
+        run: cd export && zip -r "CLT_complete_${{ env.tag }}_${{ env.full_hash }}.zip" LimbusCompany_Data
+
+      - name: Create ReleaseNotes
+        run: |
+          echo "- ${{ env.release_date }} v${{ env.tag }} update" >> export/ReleaseNotes.md
+          echo "- Build Hash: ${{ env.full_hash }}" >> export/ReleaseNotes.md
+          echo -e "\n---\n" >> export/ReleaseNotes.md
+          bash ./scripts/create_release_note.sh ./download/${{ secrets.PARA_PROJECT_ID }}/raw/RHOY/Information.json.json
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2.2.2
+        with:
+          tag_name: ${{ env.tag }}
+          name: Release ${{ env.release_date }}
+          body_path: export/ReleaseNotes.md
+          draft: false
+          prerelease: false
+          files: |
+            export/localize_files.zip
+            export/CLT_only_text_${{env.tag}}_${{env.full_hash}}.zip
+            export/CLT_complete_${{env.tag}}_${{env.full_hash}}.zip
