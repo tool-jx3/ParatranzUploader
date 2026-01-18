@@ -1,6 +1,7 @@
 Assets/
 dump/
 export/
+import/
 download/
 Test/
 
@@ -9,3 +10,4 @@ last_sha.txt
 ParatranzUploader
 scripts/copy_local_assets.sh
 files/replace_text.txt
+opencc/dictionary/*.ocd2
