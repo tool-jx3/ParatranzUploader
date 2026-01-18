@@ -175,8 +175,6 @@ func importLLCFile(h *ParatranzHandler, pf ParatranzFile, tranfolder, tranname s
 			continue
 		}
 
-		fmt.Println(tran.Translation)
-
 		filetrans[i].Translation = "[LLC]" + importTran[tran.Key]
 		filetrans[i].Stage = 1
 
