@@ -244,11 +244,13 @@ func (h *ParatranzHandler) UpdateTranslation(id int, data []byte, name string, i
 	if isRawFormat {
 		name = name + ".json"
 	}
-	fw, _ := writer.CreateFormFile("file", name)
-	fw.Write(data)
 	if isForce {
 		writer.WriteField("force", "true")
 	}
+
+	fw, _ := writer.CreateFormFile("file", name)
+	fw.Write(data)
+
 	err := writer.Close()
 	if err != nil {
 		fmt.Println(err)
